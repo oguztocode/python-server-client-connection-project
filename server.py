@@ -1,6 +1,6 @@
 import threading
 from tkinter import *
-from tkinter import scrolledtext, ttk
+from tkinter import scrolledtext
 from socket import socket, AF_INET, SOCK_STREAM
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -32,20 +32,21 @@ def decrypt_message(encrypted_message, private_key):
     )
 
 def handle_client():
-    global conn, client_public_key, message_display, show_encrypted_var
+    global conn, client_public_key, message_display
     while True:
         try:
-            encrypted_msg = conn.recv(1024)
-            if not encrypted_msg:
+            msg_type_encoded = conn.recv(1024)
+            if not msg_type_encoded:
                 print("Bağlantı kapatıldı.")
                 break
-            decrypted_msg = decrypt_message(encrypted_msg, private_key)
-            if show_encrypted_var.get():
-                # Hem şifreli hem de çözülmüş mesajı göster
-                message_display.insert(INSERT, f"Encrypted message from client: {encrypted_msg.hex()}\nDecrypted message: {decrypted_msg.decode()}\n")
-            else:
-                # Sadece çözülmüş mesajı göster
-                message_display.insert(INSERT, f"Decrypted message from client: {decrypted_msg.decode()}\n")
+            # Mesaj tipine göre işlem yap
+            if msg_type_encoded.startswith(b"encrypted:"):
+                encrypted_msg = msg_type_encoded[len("encrypted:"):]
+                decrypted_msg = decrypt_message(encrypted_msg, private_key)
+                message_display.insert(INSERT, f"Client sent an encrypted message: {encrypted_msg.hex()}\nDecrypted message: {decrypted_msg.decode()}\n")
+            elif msg_type_encoded.startswith(b"plain:"):
+                plain_msg = msg_type_encoded[len("plain:"):]
+                message_display.insert(INSERT, f"Client sent a plain message: {plain_msg.decode()}\n")
         except Exception as e:
             print(e)
             break
@@ -64,12 +65,15 @@ def start_server():
         client_public_key = serialization.load_pem_public_key(client_public_key_pem, backend=default_backend())
         handle_client()
 
-def send_message():
+def send_message(encrypted=False):
     global conn, client_public_key
     if conn and client_public_key:
         msg = message_input.get("1.0", 'end-1c').encode()
-        encrypted_msg = encrypt_message(msg, client_public_key)
-        conn.sendall(encrypted_msg)
+        if encrypted:
+            encrypted_msg = encrypt_message(msg, client_public_key)
+            conn.sendall(b"encrypted:" + encrypted_msg)
+        else:
+            conn.sendall(b"plain:" + msg)
         message_input.delete("1.0", END)
     else:
         print("Bağlantı kurulamadı veya istemcinin public key'i yok.")
@@ -87,12 +91,11 @@ message_display.grid(column=0, row=0, pady=10, padx=10)
 message_input = Text(root, height=3)
 message_input.grid(column=0, row=1, pady=10, padx=10)
 
-send_button = Button(root, text="Send Message", command=send_message)
+send_button = Button(root, text="Normal Gönder", command=lambda: send_message(False))
 send_button.grid(column=0, row=2, pady=10)
 
-show_encrypted_var = IntVar()
-show_encrypted = ttk.Checkbutton(root, text="Show Encrypted", variable=show_encrypted_var, onvalue=1, offvalue=0)
-show_encrypted.grid(column=0, row=3, pady=10)
+send_encrypted_button = Button(root, text="Gizli Gönder", command=lambda: send_message(True))
+send_encrypted_button.grid(column=0, row=3, pady=10)
 
 threading.Thread(target=start_server, daemon=True).start()
 
